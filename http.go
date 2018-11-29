@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -110,7 +112,7 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 		p.opts.Replicas = defaultReplicas
 	}
 	//p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)
-	p.peers = consistenthash.NewmpcHash(p.opts.Replicas, 3, siphash64seed, [2]uint64{1, 2}, 21)
+	p.peers = consistenthash.NewmpcHash(p.opts.Replicas, 1, siphash64seed, [2]uint64{1, 2}, 21)
 
 	RegisterPeerPicker(func() PeerPicker { return p })
 	return p
@@ -122,7 +124,7 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 func (p *HTTPPool) Set(peers ...string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.peers = consistenthash.NewmpcHash(6000, 3, siphash64seed, [2]uint64{1, 2}, 21)
+	p.peers = consistenthash.NewmpcHash(6000, 1, siphash64seed, [2]uint64{1, 2}, 21)
 	p.peers.Add(peers...)
 	p.httpGetters = make(map[string]*httpGetter, len(peers))
 	for _, peer := range peers {
@@ -142,6 +144,7 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 	return nil, false
 }
 
+//////overnest
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse request.
 	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) {
@@ -168,11 +171,13 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	group.Stats.ServerRequests.Add(1)
 	var value []byte
-	err := group.Get(ctx, key, AllocatingByteSliceSink(&value))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	dest := AllocatingByteSliceSink(&value)
+	value, err := ioutil.ReadAll(r.Body)
+	dest.SetBytes(value)
+	log.Println("sever http..........")
+	log.Println(dest.View())
+
+	group.Get(ctx, key, dest)
 
 	// Write the value to the response body as a proto message.
 	body, err := proto.Marshal(&pb.GetResponse{Value: value})
@@ -194,20 +199,25 @@ var bufferPool = sync.Pool{
 }
 
 func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse) error {
+	log.Println("context=====555", context)
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.baseURL,
 		url.QueryEscape(in.GetGroup()),
 		url.QueryEscape(in.GetKey()),
 	)
-	req, err := http.NewRequest("GET", u, nil)
+	log.Println("u=====666", in.GetValue())
+
+	req, err := http.NewRequest("GET", u, ioutil.NopCloser(bytes.NewBuffer(in.GetValue())))
 	if err != nil {
 		return err
 	}
 	tr := http.DefaultTransport
 	if h.transport != nil {
+		log.Println("context=====666", context)
 		tr = h.transport(context)
 	}
+
 	res, err := tr.RoundTrip(req)
 	if err != nil {
 		return err

@@ -23,6 +23,8 @@ type Multi struct {
 }
 
 // New returns a new multi-probe hasher.  The hash function h is used with the two seeds to generate k different probes.
+//replicas is used to define the duplicate number of files. Since we are going to
+//use erasure coding for duplication, we don't need replicas. We set replicas as 1 for now in the calling method.
 func NewmpcHash(bucketLen int, replicas int, h func(b []byte, s uint64) uint64, seeds [2]uint64, k int) *Multi {
 
 	m := &Multi{

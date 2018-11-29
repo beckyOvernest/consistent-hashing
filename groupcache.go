@@ -26,6 +26,7 @@ package groupcache
 
 import (
 	"errors"
+	"log"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -54,6 +55,20 @@ func (f GetterFunc) Get(ctx Context, key string, dest Sink) error {
 	return f(ctx, key, dest)
 }
 
+//////////////////overnest
+// A Saver saves data for a key.
+type Saver interface {
+	Save(ctx Context, key string, dest Sink) error
+}
+
+// A SaverFunc implements Getter with a function.
+type SaverFunc func(ctx Context, key string, dest Sink) error
+
+func (f SaverFunc) Save(ctx Context, key string, dest Sink) error {
+	return f(ctx, key, dest)
+}
+
+///////////////////////////
 var (
 	mu     sync.RWMutex
 	groups = make(map[string]*Group)
@@ -204,7 +219,8 @@ func (g *Group) initPeers() {
 	}
 }
 
-func (g *Group) Get(ctx Context, key string, dest Sink) error {
+/////////////////overnest
+func (g *Group) Push(ctx Context, key string, dest Sink) error {
 	g.peersOnce.Do(g.initPeers)
 	g.Stats.Gets.Add(1)
 	if dest == nil {
@@ -231,6 +247,66 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	}
 	return setSinkView(dest, value)
 }
+
+////////////////
+
+func (g *Group) Get(ctx Context, key string, dest Sink) error {
+	log.Println("context=====!!!", ctx)
+	g.peersOnce.Do(g.initPeers)
+	g.Stats.Gets.Add(1)
+	if dest == nil {
+		return errors.New("groupcache: nil dest Sink")
+	}
+	value, cacheHit := g.lookupCache(key)
+
+	if cacheHit {
+		g.Stats.CacheHits.Add(1)
+		return setSinkView(dest, value)
+	}
+
+	// Optimization to avoid double unmarshalling or copying: keep
+	// track of whether the dest was already populated. One caller
+	// (if local) will set this; the losers will not. The common
+	// case will likely be one caller.
+	destPopulated := false
+	value, destPopulated, err := g.load(ctx, key, dest)
+	if err != nil {
+		return err
+	}
+	if destPopulated {
+		return nil
+	}
+	return setSinkView(dest, value)
+}
+
+////////////////overnest
+// save save by invoking the savesss locally or by sending it to another machine.
+func (g *Group) Save(ctx Context, key string, dest Sink) error {
+	g.peersOnce.Do(g.initPeers)
+	var value ByteView
+	var err error
+	value, err = dest.View()
+
+	peer1, ok1 := g.peers.PickPeer(key)
+
+	if ok1 {
+		log.Println(peer1)
+	}
+
+	if peer, ok := g.peers.PickPeer(key); ok {
+		log.Println("save.....before calling saveToPeer")
+		log.Println(value)
+		g.saveToPeer(ctx, peer, key, value.b)
+
+	}
+	if err == nil {
+		return nil
+	}
+
+	return err
+}
+
+////////////////////
 
 // load loads key either by invoking the getter locally or by sending it to another machine.
 func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPopulated bool, err error) {
@@ -265,6 +341,7 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 		var value ByteView
 		var err error
 		if peer, ok := g.peers.PickPeer(key); ok {
+			log.Println("context=====222", ctx)
 			value, err = g.getFromPeer(ctx, peer, key)
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)
@@ -297,7 +374,7 @@ func (g *Group) getLocally(ctx Context, key string, dest Sink) (ByteView, error)
 	if err != nil {
 		return ByteView{}, err
 	}
-	return dest.view()
+	return dest.View()
 }
 
 func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView, error) {
@@ -306,6 +383,7 @@ func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView
 		Key:   &key,
 	}
 	res := &pb.GetResponse{}
+	log.Println("context=====333", ctx)
 	err := peer.Get(ctx, req, res)
 	if err != nil {
 		return ByteView{}, err
@@ -319,6 +397,22 @@ func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView
 	}
 	return value, nil
 }
+
+///////////////////overnest
+func (g *Group) saveToPeer(ctx Context, peer ProtoGetter, key string, value []byte) {
+	req := &pb.GetRequest{
+		Group: &g.name,
+		Key:   &key,
+		Value: value,
+	}
+	log.Println("saveToPeer.......")
+	log.Println(value)
+	res := &pb.GetResponse{}
+	peer.Get(ctx, req, res)
+	return
+}
+
+////////////////////////////
 
 func (g *Group) lookupCache(key string) (value ByteView, ok bool) {
 	if g.cacheBytes <= 0 {

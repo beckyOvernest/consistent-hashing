@@ -16,6 +16,7 @@ var _ = math.Inf
 type GetRequest struct {
 	Group            *string `protobuf:"bytes,1,req,name=group" json:"group,omitempty"`
 	Key              *string `protobuf:"bytes,2,req,name=key" json:"key,omitempty"`
+	Value            []byte  `protobuf:"bytes,3,opt,name=value" json:"value,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -35,6 +36,12 @@ func (m *GetRequest) GetKey() string {
 		return *m.Key
 	}
 	return ""
+}
+func (m *GetRequest) GetValue() []byte {
+	if m != nil {
+		return m.Value
+	}
+	return nil
 }
 
 type GetResponse struct {
