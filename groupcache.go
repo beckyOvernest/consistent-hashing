@@ -55,20 +55,6 @@ func (f GetterFunc) Get(ctx Context, key string, dest Sink) error {
 	return f(ctx, key, dest)
 }
 
-//////////////////overnest
-// A Saver saves data for a key.
-type Saver interface {
-	Save(ctx Context, key string, dest Sink) error
-}
-
-// A SaverFunc implements Getter with a function.
-type SaverFunc func(ctx Context, key string, dest Sink) error
-
-func (f SaverFunc) Save(ctx Context, key string, dest Sink) error {
-	return f(ctx, key, dest)
-}
-
-///////////////////////////
 var (
 	mu     sync.RWMutex
 	groups = make(map[string]*Group)
@@ -218,37 +204,6 @@ func (g *Group) initPeers() {
 		g.peers = getPeers(g.name)
 	}
 }
-
-/////////////////overnest
-func (g *Group) Push(ctx Context, key string, dest Sink) error {
-	g.peersOnce.Do(g.initPeers)
-	g.Stats.Gets.Add(1)
-	if dest == nil {
-		return errors.New("groupcache: nil dest Sink")
-	}
-	value, cacheHit := g.lookupCache(key)
-
-	if cacheHit {
-		g.Stats.CacheHits.Add(1)
-		return setSinkView(dest, value)
-	}
-
-	// Optimization to avoid double unmarshalling or copying: keep
-	// track of whether the dest was already populated. One caller
-	// (if local) will set this; the losers will not. The common
-	// case will likely be one caller.
-	destPopulated := false
-	value, destPopulated, err := g.load(ctx, key, dest)
-	if err != nil {
-		return err
-	}
-	if destPopulated {
-		return nil
-	}
-	return setSinkView(dest, value)
-}
-
-////////////////
 
 func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	log.Println("context=====!!!", ctx)
