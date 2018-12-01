@@ -207,6 +207,10 @@ func (g *Group) initPeers() {
 
 func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	log.Println("context=====!!!", ctx)
+	bv, err1 := dest.View()
+	log.Println("dest=====!!!", bv)
+	check(err1)
+
 	g.peersOnce.Do(g.initPeers)
 	g.Stats.Gets.Add(1)
 	if dest == nil {
@@ -224,6 +228,7 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	// (if local) will set this; the losers will not. The common
 	// case will likely be one caller.
 	destPopulated := false
+	log.Println("before loading...........")
 	value, destPopulated, err := g.load(ctx, key, dest)
 	if err != nil {
 		return err
@@ -253,6 +258,8 @@ func (g *Group) Save(ctx Context, key string, dest Sink) error {
 		log.Println(value)
 		g.saveToPeer(ctx, peer, key, value.b)
 
+	} else {
+		value, err = g.getLocally(ctx, key, dest)
 	}
 	if err == nil {
 		return nil
@@ -297,6 +304,7 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 		var err error
 		if peer, ok := g.peers.PickPeer(key); ok {
 			log.Println("context=====222", ctx)
+			log.Println("pick a peer::::========", peer)
 			value, err = g.getFromPeer(ctx, peer, key)
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)

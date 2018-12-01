@@ -9,6 +9,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
@@ -25,26 +26,33 @@ var Store = map[string][]byte{
 var Group = groupcache.NewGroup("foobar", 64<<20, groupcache.GetterFunc(
 	func(ctx groupcache.Context, key string, dest groupcache.Sink) error {
 		log.Println("looking up", key)
-		s := strings.Split(key, ":")
-		op, hashKey := s[0], s[1]
-		if op == "get" {
-			v, ok := Store[hashKey]
+		bv, err := dest.View()
+		if err != nil {
+			return errors.New("err....")
+		}
+		log.Println("dest:", bv, ".", bv.String() == "")
+
+		if bv.String() == "" {
+			v, ok := Store[key]
+			log.Println("find the file? :", ok)
 			if !ok {
 				return errors.New("file not found")
 			}
 			dest.SetBytes(v)
-		} else if op == "save" {
-			bv, err := dest.View()
-			if err != nil {
-				return errors.New("err....")
-			}
-			log.Println("dest:", bv)
-			Store[hashKey] = []byte(bv.String())
+		} else {
+			log.Println("save dest to Store....:", bv)
+			Store[key] = []byte(bv.String())
 		}
 
 		return nil
 	},
 ))
+
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
 
 func main() {
 	addr := flag.String("addr", ":8080", "server address")
@@ -52,11 +60,16 @@ func main() {
 	flag.Parse()
 	http.HandleFunc("/savefile", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("save!!!!")
-		fileOperation := "save:" + r.FormValue("name")
+		key := r.FormValue("name")
 		var b []byte
 		dest := groupcache.AllocatingByteSliceSink(&b)
-		dest.SetBytes([]byte("test !!!! " + r.FormValue("name")))
-		err := Group.Save(nil, fileOperation, dest)
+		//read file content
+		path := "/tmp/localfiles/"
+		dat, err := ioutil.ReadFile(path + r.FormValue("name"))
+		check(err)
+		dest.SetBytes(dat)
+		//dest.SetBytes([]byte("test !!!! " + r.FormValue("name")))
+		err = Group.Save(nil, key, dest)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -66,9 +79,9 @@ func main() {
 	})
 	http.HandleFunc("/getfile", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("get!!!!")
-		fileOperation := "get:" + r.FormValue("name")
+		key := r.FormValue("name")
 		var b []byte
-		err := Group.Get(nil, fileOperation, groupcache.AllocatingByteSliceSink(&b))
+		err := Group.Get(nil, key, groupcache.AllocatingByteSliceSink(&b))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -81,3 +94,7 @@ func main() {
 	pool.Set(p...)
 	http.ListenAndServe(*addr, nil)
 }
+
+//go run groupcache.go -addr=:8081 -pool=http://127.0.0.1:8081,http://127.0.0.1:8080,http://127.0.0.1:8082
+//curl localhost:8080/savefile?name=newTest.txt
+//curl localhost:8080/getfile?name=newTest.txt

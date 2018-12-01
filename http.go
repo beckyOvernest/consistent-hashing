@@ -138,6 +138,10 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 	if p.peers.IsEmpty() {
 		return nil, false
 	}
+	temp_peer := p.peers.Hash(key)
+	log.Println("peer picked ::::::::=", temp_peer[0])
+	log.Println("p.self:::::::::=", p.self)
+	log.Println("peer[0] != p.self", temp_peer[0] != p.self)
 	if peer := p.peers.Hash(key); peer[0] != p.self {
 		return p.httpGetters[peer[0]], true
 	}
@@ -146,6 +150,7 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 
 //////overnest
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Println("sever http..........000")
 	// Parse request.
 	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) {
 		panic("HTTPPool serving unexpected path: " + r.URL.Path)
@@ -198,6 +203,12 @@ var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
 
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
+
 func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse) error {
 	log.Println("context=====555", context)
 	u := fmt.Sprintf(
@@ -209,9 +220,9 @@ func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse
 	log.Println("u=====666", in.GetValue())
 
 	req, err := http.NewRequest("GET", u, ioutil.NopCloser(bytes.NewBuffer(in.GetValue())))
-	if err != nil {
-		return err
-	}
+	check(err)
+	log.Println("u=====777 after NewRequest")
+
 	tr := http.DefaultTransport
 	if h.transport != nil {
 		log.Println("context=====666", context)
